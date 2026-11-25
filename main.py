@@ -169,7 +169,7 @@ async def trade_loop(trade_queue, executor, risk_manager, dashboard, wallet):
                 # (rug, stop-loss) can skip the PumpPortal _build_tx
                 # roundtrip (~200-500ms). The blockhash inside expires
                 # after ~60s; risk_manager checks freshness before use.
-                asyncio.create_task(_prebuild_sell_for_position(executor, risk_manager, mint))
+                # Transaction prebuilding disabled for paper-only testing.
             else:
                 logger.warning(f"[TRADE LOOP] {symbol} buy confirmed but tokens unresolved — position skipped")
                 token["reject_reason"] = "tokens_unresolved"
@@ -442,6 +442,10 @@ def _install_global_error_handlers():
 
 
 async def main():
+    if not PAPER_TRADING or PRIVATE_KEY:
+        raise RuntimeError("Paper-only safety guard: live trading or private key configured")
+    if os.environ.get("SYNTHETIC_INJECT"):
+        raise RuntimeError("Synthetic injection disabled for market-data test")
     setup_logging()
     _install_global_error_handlers()
     _acquire_pid_lock()
