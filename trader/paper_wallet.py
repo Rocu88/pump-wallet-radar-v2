@@ -4,6 +4,7 @@ Virtual wallet for paper trading. Tracks a simulated SOL balance.
 Persists to disk so the equity curve survives bot restarts.
 """
 
+import math
 import json
 import os
 
@@ -59,10 +60,14 @@ class PaperWallet:
         return {}
 
     def deduct(self, amount: float):
+        if not math.isfinite(amount) or amount < 0 or amount > self._balance + 1e-12:
+            raise ValueError("Invalid or insufficient paper balance")
         self._balance = max(0.0, self._balance - amount)
         self._save()
 
     def credit(self, amount: float):
+        if not math.isfinite(amount) or amount < 0:
+            raise ValueError("Invalid paper credit")
         self._balance += amount
         self._save()
 
