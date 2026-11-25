@@ -172,6 +172,10 @@ class RiskManager:
         # exited. Without this a crash silently loses every open position
         # — SPL tokens stay in the wallet but the bot can't TP/stop them.
         self._load_open_positions()
+        if hasattr(self.executor, "_tokens_held"):
+            for mint, pos in self.positions.items():
+                self.executor._tokens_held[mint] = pos.tokens_held
+                self.executor.update_price(mint, pos.current_price)
 
         # Restore the ORIGINAL starting balance — the very first balance
         # we ever recorded on this bot install. Without this, every restart
@@ -577,7 +581,7 @@ class RiskManager:
             creator           = creator,
             entry_price_sol   = entry_price,
             entry_time        = time.time(),
-            sol_invested      = sol_spent,
+            sol_invested      = sol_spent + trade_result.get("fee_sol", 0),
             tokens_held       = tokens_received,
             current_price     = entry_price,
             highest_price     = entry_price,
@@ -622,7 +626,7 @@ class RiskManager:
         """
         partial_invested = pos.sol_invested * sell_fraction
         sol_received     = float(sell_result.get("sol_received", 0) or 0)
-        pnl_sol          = sol_received - partial_invested
+        pnl_sol          = sol_received - partial_invested - sell_result.get("fee_sol", 0)
 
         trade_record = {
             "mint":         mint,
@@ -662,7 +666,7 @@ class RiskManager:
             return
         self._save_open_positions()   # disk no longer lists this mint
 
-        pnl_sol = sell_result.get("sol_received", 0) - pos.sol_invested
+        pnl_sol = sell_result.get("sol_received", 0) - pos.sol_invested - sell_result.get("fee_sol", 0)
 
         trade_record = {
             "mint":         mint,
@@ -963,13 +967,18 @@ class RiskManager:
                 # exits per position, which systematically undercounted
                 # wins. Skip the partial record on the final leg (handled
                 # by close_position below) to avoid double-counting.
-                final_leg = int(pos.tokens_held * (1 - sell_fraction)) <= 0
+                sold = result.get("tokens_sold", pos.tokens_held - int(pos.tokens_held * (1 - sell_fraction)))
+                sell_fraction = sold / pos.tokens_held
+                final_leg = sold >= pos.tokens_held
+                if final_leg:
+                    self.close_position(mint, result)
+                    return
                 if not final_leg:
                     self._record_partial_close(mint, pos, sell_fraction, result, level_id)
 
                 # Local accounting: PumpPortal sold sell_fraction of the ATA balance,
                 # so reduce our tracked tokens_held + cost basis by the same fraction.
-                pos.tokens_held  = int(pos.tokens_held * (1 - sell_fraction))
+                pos.tokens_held -= sold
                 pos.sol_invested *= (1 - sell_fraction)
                 pos.tp_levels_hit.append(level_id)
                 self._save_open_positions()   # disk reflects post-TP state
@@ -1064,7 +1073,7 @@ class RiskManager:
             pos.force_sell_attempts += 1
             self._save_open_positions()
             err = result.get("error", "unknown")
-            if pos.force_sell_attempts >= MAX_FORCE_SELL_ATTEMPTS:
+            if pos.force_sell_attempts >= MAX_FORCE_SELL_ATTEMPTS and not hasattr(self.executor, "_tokens_held"):
                 # The mint is almost certainly dead (no liquidity / paused
                 # pool). Drop it from self.positions so the emergency loop
                 # isn't permanently stuck retrying this one zombie and
