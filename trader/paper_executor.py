@@ -225,6 +225,10 @@ class PaperExecutor:
 
         # Priority fee scaled to trade size, matching live pumpportal_executor.
         buy_fee = _buy_priority_fee(sol_amount)
+        if (not math.isfinite(sol_amount) or sol_amount <= 0 or
+                sol_amount + buy_fee > await self.wallet.get_sol_balance() or
+                self._tokens_held.get(token_mint, 0) > 0):
+            return {"success": False, "error": "invalid_size_or_balance_or_duplicate", "venue": "paper"}
         # Network fee gets eaten regardless of fill outcome
         self.wallet.deduct(buy_fee)
 
@@ -288,6 +292,7 @@ class PaperExecutor:
             "type":            "buy",
             "mint":            token_mint,
             "sol_spent":       sol_amount,
+            "fee_sol": buy_fee,
             "tokens_expected": tokens_received,
             "venue":           "paper",
             "timestamp":       time.time(),
@@ -336,7 +341,9 @@ class PaperExecutor:
         # full force-sells. Without resolution, paper exits silently returned
         # sol_received=0 and every partial recorded as a 100% loss of cost
         # basis regardless of the price move.
-        token_amount = self._resolve_token_amount(token_mint, token_amount)
+        token_amount = min(self._resolve_token_amount(token_mint, token_amount), self._tokens_held.get(token_mint, 0))
+        if token_amount <= 0 or self._prices.get(token_mint, 0) <= 0:
+            return {"success": False, "error": "missing_price_or_holdings", "venue": "paper"}
 
         # Sell-side priority fee, scaled to the position's notional value.
         # In live this caps at 5x the buy cap because exit urgency on a rug
@@ -344,6 +351,8 @@ class PaperExecutor:
         price_now_for_fee = self._prices.get(token_mint, 0)
         pos_value = token_amount * price_now_for_fee
         sell_fee = _sell_priority_fee(pos_value)
+        if sell_fee > await self.wallet.get_sol_balance():
+            return {"success": False, "error": "insufficient_fee_balance", "venue": "paper"}
         self.wallet.deduct(sell_fee)
 
         # Tx failure on sell — keeps position, loses gas, retries next tick
@@ -450,6 +459,8 @@ class PaperExecutor:
             "mint":                  token_mint,
             "reason":                reason,
             "sol_received":          sol_received,
+            "fee_sol": sell_fee,
+            "tokens_sold": token_amount,
             "sol_received_optimistic": sol_received_optim if is_stampede else None,
             "exit_latency_s":        latency_s if is_stampede else None,
             "venue":                 "paper",
