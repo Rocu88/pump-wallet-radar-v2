@@ -24,6 +24,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from loguru import logger
+from zoneinfo import ZoneInfo
+from logger.telegram_alerts import send_alert, alerts_enabled
 
 from config import (
     REPORT_EMAIL_FROM,
@@ -80,17 +82,17 @@ class DailyReporter:
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
     async def run(self):
-        if not _enabled():
-            logger.info("[REPORT] Daily report disabled (SMTP not configured)")
+        if not _enabled() and not alerts_enabled():
+            logger.info("[REPORT] Daily report disabled (no destination configured)")
             return
         self.running = True
         logger.info(f"[REPORT] Daily reporter started — recipient: {REPORT_EMAIL_TO}")
         while self.running:
-            now = datetime.now()
+            now = datetime.now(ZoneInfo("Europe/Zurich"))
             target = (now + timedelta(days=1)).replace(
                 hour=0, minute=0, second=5, microsecond=0
             )
-            sleep_s = max(60, (target - now).total_seconds())
+            sleep_s = max(60, target.timestamp() - now.timestamp())
             try:
                 await asyncio.sleep(sleep_s)
             except asyncio.CancelledError:
@@ -98,7 +100,18 @@ class DailyReporter:
             if not self.running:
                 break
             try:
-                self.send_report()
+                stats = self._gather()
+                balance = await self.risk_mgr.wallet.get_sol_balance()
+                held = sum(p.current_price * p.tokens_held for p in self.risk_mgr.positions.values())
+                send_alert(f"📊 <b>Virtueller Tagesbericht</b>\n"
+                           f"Verkaufsabschlüsse: {len(stats['trades'])}\n"
+                           f"Gewinnquote: {stats['wr']:.1f}%\n"
+                           f"Erfasster realisierter PnL: {stats['total_pnl']:+.4f} SOL\n"
+                           f"Freies Guthaben: {balance:.4f} SOL\n"
+                           f"Geschätzter Gesamtwert: {balance + held:.4f} SOL\n"
+                           f"Offene Positionen: {stats['open_positions']}")
+                if _enabled():
+                    await asyncio.to_thread(self.send_report)
             except Exception as e:
                 logger.warning(f"[REPORT] send failed: {e}")
 
