@@ -20,13 +20,14 @@ at ~85 SOL deposited beyond the virtual baseline.
 
 import asyncio
 import json
+import os
 import time
 from collections.abc import Callable
 
 import websockets
 from loguru import logger
 
-PUMPPORTAL_WS        = "wss://pumpportal.fun/api/data"
+PUMPPORTAL_WS        = os.getenv("PUMPPORTAL_WS_URL", "").strip()
 MIGRATION_SOL_TARGET = 85.0   # ~85 SOL triggers migration to Raydium
 
 # Disguise our user-agent so PumpPortal doesn't trivially fingerprint us
@@ -111,6 +112,8 @@ class PumpFunMonitor:
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
     async def run(self):
+        if not PUMPPORTAL_WS:
+            raise RuntimeError("PUMPPORTAL_WS_URL is missing")
         self.running = True
         logger.info("PumpFun monitor starting (single shared WS to PumpPortal)...")
         await self.stream()
@@ -169,7 +172,7 @@ class PumpFunMonitor:
                         self._ws = None
                         self._trade_subbed.clear()
                 except Exception as e:
-                    logger.error(f"PumpPortal WS fallback error: {e}")
+                    logger.error(f"PumpPortal WS fallback error: {type(e).__name__}")
                     await asyncio.sleep(backoff)
             except Exception as e:
                 # Exponential backoff up to 5 min on 403 rate-limit
@@ -178,7 +181,7 @@ class PumpFunMonitor:
                     backoff = min(backoff * 2, 300)
                     logger.error(f"PumpPortal WS 403 rate-limit; backoff {backoff}s")
                 else:
-                    logger.error(f"PumpPortal WS error: {e}")
+                    logger.error(f"PumpPortal WS error: {type(e).__name__}")
                 await asyncio.sleep(backoff)
 
     # ── Message dispatch ──────────────────────────────────────────────────────
@@ -188,6 +191,10 @@ class PumpFunMonitor:
         except Exception:
             return
 
+        if not isinstance(data, dict):
+            return
+        if "message" in data and not data.get("txType"):
+            logger.info("PumpPortal control message received (check subscription status)")
         tx_type = data.get("txType", "")
 
         if tx_type == "create":
