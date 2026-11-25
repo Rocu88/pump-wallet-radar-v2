@@ -27,7 +27,7 @@ import aiohttp
 from loguru import logger
 
 _BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-_CHAT_ID   = os.getenv("TELEGRAM_OWNER_CHAT_ID", "")
+_CHAT_ID   = os.getenv("TELEGRAM_OWNER_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID", "")
 _API_URL   = f"https://api.telegram.org/bot{_BOT_TOKEN}/sendMessage"
 
 _warned = False
@@ -54,10 +54,9 @@ async def _post(text: str) -> None:
                 timeout=aiohttp.ClientTimeout(total=4),
             ) as r:
                 if r.status != 200:
-                    body = await r.text()
-                    logger.debug(f"[ALERTS] http {r.status}: {body[:200]}")
+                    logger.warning(f"[ALERTS] HTTP {r.status}")
     except Exception as e:
-        logger.debug(f"[ALERTS] send failed: {e}")
+        logger.warning(f"[ALERTS] send failed: {type(e).__name__}")
 
 
 def send_alert(text: str) -> None:
@@ -78,3 +77,7 @@ def send_alert(text: str) -> None:
             pass
         return
     loop.create_task(_post(text))
+
+
+def alerts_enabled():
+    return _ready()
