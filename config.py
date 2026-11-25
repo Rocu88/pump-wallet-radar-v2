@@ -58,14 +58,12 @@ def _env_json(name: str, default):
         return default
 
 # ─── PAPER TRADING ─────────────────────────────────────────────────────────────
-PAPER_TRADING       = _env_bool("PAPER_TRADING", True)   # Safe default: paper.
-                                                          # Set PAPER_TRADING=false in
-                                                          # .env to enable real-money trading.
+PAPER_TRADING = True  # Paper mode locked on.
 PAPER_STARTING_SOL  = _env_float("PAPER_STARTING_SOL", 1.0)  # Virtual SOL balance for paper mode
 PAPER_TIME_EXIT_MIN = _env_int  ("PAPER_TIME_EXIT_MIN", 10)  # Force-exit paper positions after N minutes
 
 # ─── WALLET ────────────────────────────────────────────────────────────────────
-PRIVATE_KEY    = os.getenv("SOLANA_PRIVATE_KEY", "YOUR_PRIVATE_KEY_HERE")
+PRIVATE_KEY = ""  # No wallet signing key loaded.
 RPC_URL        = os.getenv("RPC_URL", "https://api.mainnet-beta.solana.com")
 HELIUS_API_KEY = os.getenv("HELIUS_API_KEY", "")
 
